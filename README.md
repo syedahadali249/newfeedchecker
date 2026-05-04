@@ -1,220 +1,247 @@
-# 📡 Fetch Data HTTP Server
-
-A Node.js HTTP server that fetches content from any URL by first trying an RSS feed, then falling back to a SmartCursor browser automation job. All configuration is loaded from a `.env` file.
+Here is your clean, properly formatted `README.md` file (ready to copy-paste into your project):
 
 ---
 
-## 🗂️ Project Structure
+```md
+# SmartCursor RSS Hybrid SDK
 
-```
-project/
-├── server.js        # Main HTTP server & pipeline logic
-├── .env             # Environment variables (do not commit)
-├── .env.example     # Example env file (safe to commit)
-├── package.json     # Dependencies
-└── README.md
-```
+A lightweight Node.js SDK that provides a hybrid data-fetching system using **RSS first**, and **SmartCursor fallback when RSS has no results**.
+
+It is designed to unify multiple data sources behind a single simple API.
 
 ---
 
-## ⚙️ Setup
+## 📁 Project Architecture
 
-### 1. Install dependencies
+```
+
+src/
+├── SmartFetcher.js     # Main SDK class (public API)
+├── core.js             # Reserved (currently unused)
+├── config.js           # Configuration validation & defaults
+├── pipeline.js         # Orchestrates RSS → SmartCursor flow
+├── rss.js              # RSS fetching implementation
+├── smartcursor.js      # SmartCursor job-based workflow
+└── utils/
+├── fetchWithTimeout.js
+├── safeFetch.js
+├── logger.js
+└── sleep.js
+
+index.js                # SDK entry point (exports SmartFetcher)
+package.json            # Package metadata & dependencies
+
+````
+
+---
+
+## ⚙️ Installation
 
 ```bash
 npm install
-```
+````
 
-### 2. Configure environment
+> Uses `node-fetch@^2.7.0`
 
-Create a `.env` file in the project root:
+---
 
-```env
-RSS_ENDPOINT=https://genie-rss-5i00.onrender.com/api/rss/fetch
-SMARTCURSOR_BASE=https://smartcursorbrowser.onrender.com
-API_KEY=your_api_key_here
-PORT=3000
-```
+## 🚀 Usage
 
-| Variable          | Description                              | Default |
-|-------------------|------------------------------------------|---------|
-| `RSS_ENDPOINT`    | URL of the RSS fetch API                 | —       |
-| `SMARTCURSOR_BASE`| Base URL of the SmartCursor browser API  | —       |
-| `API_KEY`         | Shared API key for both services         | —       |
-| `PORT`            | Port the HTTP server listens on          | `3000`  |
+### Import SDK
 
-> ⚠️ Never commit your `.env` file. Add it to `.gitignore`.
-
-### 3. Start the server
-
-```bash
-node server.js
-```
-
-You should see:
-
-```
-✅ Server running on http://localhost:3000
-   POST /fetch   { "url": "...", "since": "..." }
-   GET  /health
+```js
+const SmartFetcher = require("./index");
 ```
 
 ---
 
-## 🚀 API Reference
+### Create Instance
 
-### `POST /fetch`
-
-Fetches content from a given URL. Tries RSS first; falls back to SmartCursor browser automation if RSS returns nothing.
-
-**Request Body (JSON):**
-
-| Field   | Type   | Required | Description                                           |
-|---------|--------|----------|-------------------------------------------------------|
-| `url`   | string | ✅ Yes   | The URL to fetch content from                         |
-| `since` | string | ❌ No    | ISO 8601 timestamp. Defaults to last 24 hours if omitted |
-
-**Example Request:**
-
-```bash
-curl -X POST http://localhost:3000/fetch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://www.cnbc.com/finance",
-    "since": "2026-04-29T00:00:00Z"
-  }'
+```js
+const fetcher = new SmartFetcher({
+  smartcursorBase: "https://api.smartcursor.io",
+  apiKey: "YOUR_API_KEY",
+  rssEndpoint: "https://your-rss-endpoint.com",
+  timeout: 60000,
+  retries: 3,
+});
 ```
-
-**Example Response (RSS source):**
-
-```json
-{
-  "source": "rss",
-  "data": { ... },
-  "debug": [ ... ]
-}
-```
-
-**Example Response (SmartCursor source):**
-
-```json
-{
-  "source": "smartcursor",
-  "data": { ... },
-  "debug": [ ... ]
-}
-```
-
-| Field    | Description                                              |
-|----------|----------------------------------------------------------|
-| `source` | Either `"rss"` or `"smartcursor"` — which pipeline was used |
-| `data`   | The fetched content                                      |
-| `debug`  | Full log of every internal step with timestamps          |
 
 ---
 
-### `GET /health`
+## 📥 Fetch Data
 
-Quick liveness check to confirm the server is running.
+```js
+const result = await fetcher.fetch("https://example.com/feed");
 
-```bash
-curl http://localhost:3000/health
+console.log(result);
 ```
 
-**Response:**
+---
 
-```json
+## 🔧 Fetch Options
+
+```js
+fetch(url, {
+  since: Date.now() - 24 * 60 * 60 * 1000 // optional
+});
+```
+
+### Default behavior:
+
+* If `since` is not provided → SDK automatically uses **last 24 hours**
+
+---
+
+## 🔄 How It Works (Pipeline Flow)
+
+The SDK uses a smart fallback pipeline:
+
+### 1. RSS First
+
+* `pipeline.js` calls `rss.js`
+* Sends:
+
+  * `url`
+  * `since`
+* If RSS returns data → return immediately
+
+---
+
+### 2. SmartCursor Fallback
+
+If RSS returns no data:
+
+Workflow:
+
+```
+warmup(config)
+→ createJob(config, url, since)
+→ waitForJob(jobId)
+→ getResult(jobId)
+```
+
+---
+
+## 📤 Response Format
+
+All responses are normalized:
+
+```js
 {
-  "status": "ok",
-  "timestamp": "2026-04-30T10:00:00.000Z"
+  source: "rss" | "smartcursor",
+  data: { ... }
 }
 ```
 
 ---
 
-## 🔄 How the Pipeline Works
+## 🧠 SmartCursor Workflow Details
+
+The SmartCursor module:
+
+* Prepares environment (`warmup`)
+* Creates a job for URL processing
+* Polls job status until completion
+* Fetches final result
+
+---
+
+## 🌐 RSS Module
+
+* Uses `rssEndpoint`
+* Sends POST request with:
+
+  * `url`
+  * `since`
+
+Returns:
+
+* Parsed JSON data OR `null`
+
+---
+
+## 🔁 Retry & Timeout System
+
+### safeFetch
+
+* Automatically retries failed requests
+* Controlled by `retries` config
+
+### fetchWithTimeout
+
+* Uses `AbortController`
+* Prevents hanging requests
+
+---
+
+## 🧰 Utilities
+
+| File                | Purpose               |
+| ------------------- | --------------------- |
+| logger.js           | Debug logging         |
+| sleep.js            | Delay/pause execution |
+| safeFetch.js        | Retry wrapper         |
+| fetchWithTimeout.js | Timeout-safe fetch    |
+
+---
+
+## ⚙️ Configuration
+
+### Required
+
+* `smartcursorBase`
+* `apiKey`
+
+### Optional
+
+* `rssEndpoint` → RSS service URL
+* `timeout` → default `60000ms`
+* `retries` → default `3`
+
+---
+
+## 📦 Entry Point Flow
 
 ```
-POST /fetch
-    │
-    ▼
-┌─────────────┐
-│  Try RSS    │ ──► RSS returns data? ──► Return { source: "rss", data }
-└─────────────┘
-    │ (no data)
-    ▼
-┌──────────────────┐
-│ Warmup SmartCursor│  (wakes up the render server)
-└──────────────────┘
-    │
-    ▼
-┌──────────────┐
-│  Create Job  │  POST /jobs  →  jobId
-└──────────────┘
-    │
-    ▼
-┌──────────────┐
-│  Poll Job    │  GET /jobs/:jobId  (up to 4 min)
-└──────────────┘
-    │ (completed)
-    ▼
-┌──────────────┐
-│  Get Result  │  GET /jobs/:jobId/result
-└──────────────┘
-    │
-    ▼
-Return { source: "smartcursor", data }
+index.js
+   ↓
+SmartFetcher.js
+   ↓
+pipeline.js
+   ↓
+rss.js → (success)
+   ↓
+smartcursor.js → (fallback)
 ```
 
 ---
 
-## 🛠️ Error Handling
+## 📌 Notes
 
-| Scenario                     | Behaviour                                      |
-|------------------------------|------------------------------------------------|
-| Missing `url` in body        | `400` — `{ "error": "Missing required field: url" }` |
-| Invalid JSON body            | `500` — `{ "error": "Invalid JSON body" }`     |
-| RSS fails silently           | Falls through to SmartCursor automatically     |
-| SmartCursor job times out    | `500` — `{ "error": "Job timeout" }`           |
-| Network error (with retries) | Retries up to 3 times with 3s delay, then `500`|
-| Unknown route                | `404` — `{ "error": "Not found..." }`          |
+* `core.js` is currently unused (reserved for future expansion)
+* RSS is always the primary data source
+* SmartCursor is only used when RSS fails
+* Fully modular design for easy extension
 
 ---
 
-## 📦 Dependencies
+## 🧪 Example Output
 
-```json
+### RSS Success
+
+```js
 {
-  "dependencies": {
-    "dotenv": "^16.0.0",
-    "node-fetch": "^2.7.0"
-  }
+  source: "rss",
+  data: { items: [...] }
 }
 ```
 
-Install with:
+### SmartCursor Fallback
 
-```bash
-npm install dotenv node-fetch
+```js
+{
+  source: "smartcursor",
+  data: { results: [...] }
+}
 ```
-
-> **Note:** Use `node-fetch` v2 (CommonJS). v3+ is ESM-only and requires `import` syntax.
-
----
-
-## 🔒 Security Notes
-
-- Keep your `API_KEY` secret — store it only in `.env`
-- Add `.env` to your `.gitignore`:
-  ```
-  .env
-  ```
-- Create a `.env.example` with placeholder values for teammates:
-  ```env
-  RSS_ENDPOINT=
-  SMARTCURSOR_BASE=
-  API_KEY=
-  PORT=3000
-  ```
-
----
